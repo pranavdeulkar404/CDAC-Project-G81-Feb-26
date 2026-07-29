@@ -1,17 +1,19 @@
-package com.sprintflow.bug.entity;
+package com.sprintflow.task.entity;
 
 import com.sprintflow.common.audit.AuditableEntity;
 import com.sprintflow.project.entity.Project;
 import com.sprintflow.user.entity.User;
 import jakarta.persistence.*;
 
+import java.time.LocalDate;
+
 @Entity
-@Table(name = "bugs", indexes = {
-        @Index(name = "idx_bugs_project", columnList = "project_id"),
-        @Index(name = "idx_bugs_assignee_status", columnList = "assigned_to,status"),
-        @Index(name = "idx_bugs_severity", columnList = "severity")
+@Table(name = "tasks", indexes = {
+        @Index(name = "idx_tasks_project", columnList = "project_id"),
+        @Index(name = "idx_tasks_assignee_status", columnList = "assigned_to,status"),
+        @Index(name = "idx_tasks_due_date", columnList = "due_date")
 })
-public class Bug extends AuditableEntity {
+public class TaskItem extends AuditableEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -25,23 +27,25 @@ public class Bug extends AuditableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private BugSeverity severity;
+    private TaskPriority priority;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private BugStatus status;
+    private TaskStatus status;
+
+    private LocalDate dueDate;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "project_id", nullable = false, foreignKey = @ForeignKey(name = "fk_bugs_project"))
+    @JoinColumn(name = "project_id", nullable = false, foreignKey = @ForeignKey(name = "fk_tasks_project"))
     private Project project;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "assigned_to", foreignKey = @ForeignKey(name = "fk_bugs_assignee"))
+    @JoinColumn(name = "assigned_to", foreignKey = @ForeignKey(name = "fk_tasks_assignee"))
     private User assignedTo;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "reported_by", nullable = false, foreignKey = @ForeignKey(name = "fk_bugs_reporter"))
-    private User reportedBy;
+    @JoinColumn(name = "created_by", nullable = false, foreignKey = @ForeignKey(name = "fk_tasks_creator"))
+    private User createdBy;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -49,14 +53,16 @@ public class Bug extends AuditableEntity {
     public void setTitle(String title) { this.title = title; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
-    public BugSeverity getSeverity() { return severity; }
-    public void setSeverity(BugSeverity severity) { this.severity = severity; }
-    public BugStatus getStatus() { return status; }
-    public void setStatus(BugStatus status) { this.status = status; }
+    public TaskPriority getPriority() { return priority; }
+    public void setPriority(TaskPriority priority) { this.priority = priority; }
+    public TaskStatus getStatus() { return status; }
+    public void setStatus(TaskStatus status) { this.status = status; }
+    public LocalDate getDueDate() { return dueDate; }
+    public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
     public Project getProject() { return project; }
     public void setProject(Project project) { this.project = project; }
     public User getAssignedTo() { return assignedTo; }
     public void setAssignedTo(User assignedTo) { this.assignedTo = assignedTo; }
-    public User getReportedBy() { return reportedBy; }
-    public void setReportedBy(User reportedBy) { this.reportedBy = reportedBy; }
+    public User getCreatedBy() { return createdBy; }
+    public void setCreatedBy(User createdBy) { this.createdBy = createdBy; }
 }

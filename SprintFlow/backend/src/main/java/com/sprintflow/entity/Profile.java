@@ -1,28 +1,29 @@
-package com.sprintflow.entity;
+package com.sprintflow.user.entity;
 
+import com.sprintflow.common.audit.AuditableEntity;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "profiles", uniqueConstraints = @UniqueConstraint(columnNames = "user_id"))
-public class Profile {
+@Table(name = "profiles", indexes = @Index(name = "idx_profiles_user", columnList = "user_id", unique = true))
+public class Profile extends AuditableEntity {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne(optional = false, fetch = FetchType.EAGER)
-    @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false, unique = true,
+            foreignKey = @ForeignKey(name = "fk_profiles_user"))
     private User user;
 
-    @Column(length = 30)
+    @Column(length = 25)
     private String phone;
 
     @Column(length = 100)
     private String designation;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(length = 1000)
     private String bio;
-
-    public Profile() {}
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }

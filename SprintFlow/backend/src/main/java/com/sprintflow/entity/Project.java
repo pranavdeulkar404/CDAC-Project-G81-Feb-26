@@ -1,32 +1,40 @@
-package com.sprintflow.entity;
+package com.sprintflow.project.entity;
 
+import com.sprintflow.common.audit.AuditableEntity;
+import com.sprintflow.user.entity.User;
 import jakarta.persistence.*;
+
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "projects")
-public class Project {
+@Table(name = "projects", indexes = {
+        @Index(name = "idx_projects_status", columnList = "status"),
+        @Index(name = "idx_projects_created_by", columnList = "created_by")
+})
+public class Project extends AuditableEntity {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 150)
+    @Column(nullable = false, length = 180)
     private String title;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(nullable = false, length = 4000)
     private String description;
 
-    @Column(name = "start_date")
+    @Column(nullable = false)
     private LocalDate startDate;
 
-    @Column(nullable = false, length = 40)
-    private String status;
+    private LocalDate endDate;
 
-    @ManyToOne(optional = false, fetch = FetchType.EAGER)
-    @JoinColumn(name = "created_by", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private ProjectStatus status;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "created_by", nullable = false, foreignKey = @ForeignKey(name = "fk_projects_creator"))
     private User createdBy;
-
-    public Project() {}
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -36,8 +44,10 @@ public class Project {
     public void setDescription(String description) { this.description = description; }
     public LocalDate getStartDate() { return startDate; }
     public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public LocalDate getEndDate() { return endDate; }
+    public void setEndDate(LocalDate endDate) { this.endDate = endDate; }
+    public ProjectStatus getStatus() { return status; }
+    public void setStatus(ProjectStatus status) { this.status = status; }
     public User getCreatedBy() { return createdBy; }
     public void setCreatedBy(User createdBy) { this.createdBy = createdBy; }
 }
