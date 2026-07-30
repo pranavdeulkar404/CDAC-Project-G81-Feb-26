@@ -11,6 +11,8 @@ import com.sprintflow.comment.repository.CommentRepository;
 import com.sprintflow.common.exception.BusinessException;
 import com.sprintflow.common.exception.ResourceNotFoundException;
 import com.sprintflow.common.response.PageResponse;
+import com.sprintflow.integration.audit.AuditEventPublisher;
+import com.sprintflow.integration.audit.AuditEventType;
 import com.sprintflow.integration.notification.EmailNotificationRequest;
 import com.sprintflow.integration.notification.EmailNotificationType;
 import com.sprintflow.notification.entity.NotificationType;
@@ -27,6 +29,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
+
 @Service
 public class BugService {
 
@@ -36,6 +40,7 @@ public class BugService {
     private final UserService userService;
     private final CurrentUserService currentUserService;
     private final NotificationService notificationService;
+    private final AuditEventPublisher auditEventPublisher;
 
     public BugService(
             BugRepository bugRepository,
@@ -43,7 +48,8 @@ public class BugService {
             ProjectService projectService,
             UserService userService,
             CurrentUserService currentUserService,
-            NotificationService notificationService
+            NotificationService notificationService,
+            AuditEventPublisher auditEventPublisher
     ) {
         this.bugRepository = bugRepository;
         this.commentRepository = commentRepository;
@@ -51,6 +57,7 @@ public class BugService {
         this.userService = userService;
         this.currentUserService = currentUserService;
         this.notificationService = notificationService;
+        this.auditEventPublisher = auditEventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -84,6 +91,19 @@ public class BugService {
         if (saved.getAssignedTo() != null) {
             notifyAssignment(saved, null, saved.getAssignedTo(), actor);
         }
+        auditEventPublisher.publish(
+                AuditEventType.BUG_CREATED,
+                "BUG",
+                saved.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Created bug \"" + saved.getTitle() + "\".",
+                Map.of(
+                        "projectId", saved.getProject().getId().toString(),
+                        "severity", saved.getSeverity().name(),
+                        "status", saved.getStatus().name()
+                )
+        );
         return response(saved);
     }
 
@@ -111,6 +131,21 @@ public class BugService {
                     "Bug \"" + saved.getTitle() + "\" severity changed to "
                             + label(saved.getSeverity().name()) + ".");
         }
+        auditEventPublisher.publish(
+                AuditEventType.BUG_UPDATED,
+                "BUG",
+                saved.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Updated bug \"" + saved.getTitle() + "\".",
+                Map.of(
+                        "projectId", saved.getProject().getId().toString(),
+                        "previousStatus", oldStatus.name(),
+                        "status", saved.getStatus().name(),
+                        "previousSeverity", oldSeverity.name(),
+                        "severity", saved.getSeverity().name()
+                )
+        );
         return response(saved);
     }
 
@@ -126,6 +161,19 @@ public class BugService {
             notifyUpdate(saved, actor, NotificationType.STATUS_UPDATE,
                     "Bug \"" + saved.getTitle() + "\" moved from " + label(old.name())
                             + " to " + label(status.name()) + ".");
+            auditEventPublisher.publish(
+                    AuditEventType.BUG_STATUS_CHANGED,
+                    "BUG",
+                    saved.getId(),
+                    actor.getId(),
+                    actor.getName(),
+                    "Changed bug \"" + saved.getTitle() + "\" status.",
+                    Map.of(
+                            "projectId", saved.getProject().getId().toString(),
+                            "previousStatus", old.name(),
+                            "status", status.name()
+                    )
+            );
         }
         return response(saved);
     }
@@ -134,11 +182,24 @@ public class BugService {
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
     public void delete(Long id) {
         Bug bug = require(id);
-        requireManage(bug, currentUserService.requireUser());
+        User actor = currentUserService.requireUser();
+        requireManage(bug, actor);
         if (commentRepository.existsByBugId(id)) {
             throw new BusinessException("Bugs with comments cannot be deleted");
         }
         bugRepository.delete(bug);
+        auditEventPublisher.publish(
+                AuditEventType.BUG_DELETED,
+                "BUG",
+                bug.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Deleted bug \"" + bug.getTitle() + "\".",
+                Map.of(
+                        "projectId", bug.getProject().getId().toString(),
+                        "status", bug.getStatus().name()
+                )
+        );
     }
 
     public Bug require(Long id) {

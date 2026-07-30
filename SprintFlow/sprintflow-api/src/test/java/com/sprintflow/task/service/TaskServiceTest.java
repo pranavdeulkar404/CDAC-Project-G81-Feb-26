@@ -2,6 +2,8 @@ package com.sprintflow.task.service;
 
 import com.sprintflow.auth.security.CurrentUserService;
 import com.sprintflow.comment.repository.CommentRepository;
+import com.sprintflow.integration.audit.AuditEventPublisher;
+import com.sprintflow.integration.audit.AuditEventType;
 import com.sprintflow.notification.service.NotificationService;
 import com.sprintflow.project.entity.Project;
 import com.sprintflow.project.entity.ProjectStatus;
@@ -36,6 +38,7 @@ class TaskServiceTest {
     @Mock UserService userService;
     @Mock CurrentUserService currentUserService;
     @Mock NotificationService notificationService;
+    @Mock AuditEventPublisher auditEventPublisher;
     TaskService service;
     User manager;
     User firstAssignee;
@@ -45,7 +48,7 @@ class TaskServiceTest {
     @BeforeEach
     void setUp() {
         service = new TaskService(taskRepository, commentRepository, projectService,
-                userService, currentUserService, notificationService);
+                userService, currentUserService, notificationService, auditEventPublisher);
         manager = user(1L, "Manager", UserRole.MANAGER);
         firstAssignee = user(2L, "First", UserRole.MEMBER);
         secondAssignee = user(3L, "Second", UserRole.MEMBER);
@@ -71,6 +74,8 @@ class TaskServiceTest {
 
         assertThat(response.assignedTo()).isNull();
         verify(notificationService).notify(eq(firstAssignee), eq(manager), any(), any(), any(), eq(20L), any());
+        verify(auditEventPublisher).publish(eq(AuditEventType.TASK_CREATED), eq("TASK"),
+                eq(20L), eq(1L), eq("Manager"), contains("Build screen"), anyMap());
     }
 
     @Test

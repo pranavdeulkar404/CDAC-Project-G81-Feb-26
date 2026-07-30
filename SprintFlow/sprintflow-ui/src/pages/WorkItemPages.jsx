@@ -1,9 +1,9 @@
-import { ArrowLeft, Bug, Calendar, Edit3, ListChecks, MessageSquare, Plus, Search, Send, Trash2, UserRound } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Bug, Calendar, Check, Edit3, ListChecks, LoaderCircle, MessageSquare, Plus, RefreshCw, Search, Send, Sparkles, Trash2, UserRound, WandSparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiError } from '../api/client'
-import { bugService, commentService, projectService, taskService, userService } from '../api/services'
+import { aiService, bugService, commentService, projectService, taskService, userService } from '../api/services'
 import { Badge, ConfirmDialog, Empty, ErrorState, formatDate, Loading, PageHeader, Pagination } from '../components/Ui'
 import { useAuth } from '../context/AuthContext'
 
@@ -133,6 +133,7 @@ export function WorkItemFormPage({ type }) {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [pendingDraft, setPendingDraft] = useState(null)
 
   useEffect(() => {
     const requests = [projectService.list({ page: 0, size: 100 }), userService.assignable()]
@@ -168,27 +169,207 @@ export function WorkItemFormPage({ type }) {
     }
   }
 
+  const commitDraft = (draft) => {
+    setForm((current) => ({
+      ...current,
+      title: draft.title,
+      description: draft.description,
+      [config.level]: draft[config.level],
+    }))
+    setPendingDraft(null)
+    toast.success(`AI draft applied. Review it before creating the ${config.singular}.`)
+  }
+
+  const applyDraft = (draft) => {
+    if (form.title.trim() || form.description.trim()) {
+      setPendingDraft(draft)
+      return
+    }
+    commitDraft(draft)
+  }
+
   if (loading) return <Loading label={`Loading ${config.singular}…`} />
   return (
-    <section className="content-narrow">
-      <button className="back-link" onClick={() => navigate(-1)}><ArrowLeft size={16} />Back</button>
-      <div className="panel form-panel">
-        <div className="panel-heading"><span className="eyebrow">{config.eyebrow}</span><h1>{editing ? `Edit ${config.singular}` : `Create a ${config.singular}`}</h1><p>{type === 'tasks' ? 'Define clear ownership, priority, and a target date.' : 'Describe the issue clearly so it can be reproduced and resolved.'}</p></div>
-        <form className="stack-form" onSubmit={submit}>
-          <label className="field"><span>Title</span><input required maxLength="180" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-          <label className="field"><span>Description</span><textarea required rows="7" maxLength="4000" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-          <div className="form-grid">
+    <>
+      <section className="content-narrow">
+        <button className="back-link" onClick={() => navigate(-1)}><ArrowLeft size={16} />Back</button>
+        <div className="panel form-panel">
+          <div className="panel-heading"><span className="eyebrow">{config.eyebrow}</span><h1>{editing ? `Edit ${config.singular}` : `Create a ${config.singular}`}</h1><p>{type === 'tasks' ? 'Define clear ownership, priority, and a target date.' : 'Describe the issue clearly so it can be reproduced and resolved.'}</p></div>
+          <form className="stack-form" onSubmit={submit}>
             <label className="field"><span>Project</span><select required value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })}><option value="">Select a project</option>{projects.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
-            <label className="field"><span>Assign to</span><select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}><option value="">Unassigned</option>{users.map((user) => <option value={user.id} key={user.id}>{user.name} — {user.role.toLowerCase()}</option>)}</select></label>
-            <label className="field"><span>{capitalize(config.level)}</span><select value={form[config.level]} onChange={(e) => setForm({ ...form, [config.level]: e.target.value })}>{LEVELS.map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label className="field"><span>Status</span><select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{config.statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
-            {type === 'tasks' && <label className="field"><span>Due date</span><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></label>}
+            {!editing && <AiDraftAssistant type={type} config={config} projectId={form.projectId} onApply={applyDraft} />}
+            <label className="field"><span>Title</span><input required maxLength="180" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+            <label className="field"><span>Description</span><textarea required rows="7" maxLength="4000" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+            <div className="form-grid">
+              <label className="field"><span>Assign to</span><select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}><option value="">Unassigned</option>{users.map((user) => <option value={user.id} key={user.id}>{user.name} — {user.role.toLowerCase()}</option>)}</select></label>
+              <label className="field"><span>{capitalize(config.level)}</span><select value={form[config.level]} onChange={(e) => setForm({ ...form, [config.level]: e.target.value })}>{LEVELS.map((item) => <option key={item}>{item}</option>)}</select></label>
+              <label className="field"><span>Status</span><select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{config.statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
+              {type === 'tasks' && <label className="field"><span>Due date</span><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></label>}
+            </div>
+            <div className="form-actions"><button className="button secondary" type="button" onClick={() => navigate(-1)}>Cancel</button><button className="button primary" disabled={busy}>{busy ? 'Saving…' : editing ? 'Save changes' : `Create ${config.singular}`}</button></div>
+          </form>
+        </div>
+      </section>
+      <ConfirmDialog
+        open={Boolean(pendingDraft)}
+        title="Replace the current draft?"
+        message="Applying the AI draft will replace the title and description you have entered. Project, assignee, status, and due date will stay unchanged."
+        confirmLabel="Replace and apply"
+        onConfirm={() => commitDraft(pendingDraft)}
+        onClose={() => setPendingDraft(null)}
+      />
+    </>
+  )
+}
+
+function AiDraftAssistant({ type, config, projectId, onApply }) {
+  const [providerStatus, setProviderStatus] = useState(null)
+  const [checking, setChecking] = useState(true)
+  const [prompt, setPrompt] = useState('')
+  const [draft, setDraft] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const loadStatus = useCallback(async () => {
+    setChecking(true)
+    setError('')
+    try {
+      setProviderStatus(await aiService.status())
+    } catch (requestError) {
+      setProviderStatus(null)
+      setError(aiAssistantError(requestError, 'AI status could not be checked. You can still complete the form manually.'))
+    } finally {
+      setChecking(false)
+    }
+  }, [])
+
+  useEffect(() => { loadStatus() }, [loadStatus])
+
+  const ready = Boolean(providerStatus?.enabled && providerStatus?.configured && providerStatus?.available)
+  const validPrompt = prompt.trim().length >= 5 && prompt.length <= 600
+
+  const generate = async () => {
+    if (!projectId) {
+      setError('Select a project before generating a draft.')
+      return
+    }
+    if (!validPrompt) {
+      setError('Describe what you need in 5 to 600 characters.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const request = { prompt: prompt.trim(), projectId: Number(projectId) }
+      const generated = type === 'tasks'
+        ? await aiService.generateTask(request)
+        : await aiService.generateBug(request)
+      setDraft(generated)
+    } catch (requestError) {
+      setError(aiAssistantError(requestError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancel = () => {
+    setDraft(null)
+    setError('')
+  }
+
+  return (
+    <section className="ai-draft-card" aria-labelledby="ai-draft-title">
+      <div className="ai-draft-glow" aria-hidden="true" />
+      <header className="ai-draft-header">
+        <span className="ai-draft-icon"><Sparkles size={20} /></span>
+        <div>
+          <div className="ai-draft-title-row">
+            <h2 id="ai-draft-title">Draft with AI</h2>
+            <AiStatusPill checking={checking} status={providerStatus} />
           </div>
-          <div className="form-actions"><button className="button secondary" type="button" onClick={() => navigate(-1)}>Cancel</button><button className="button primary" disabled={busy}>{busy ? 'Saving…' : editing ? 'Save changes' : `Create ${config.singular}`}</button></div>
-        </form>
-      </div>
+          <p>Turn a short idea into a structured {config.singular} draft. Nothing is saved until you review the form and create it.</p>
+        </div>
+      </header>
+
+      {!checking && !ready && (
+        <div className="ai-status-message" role="status">
+          <AlertCircle size={17} />
+          <span>{providerStatus?.message || error || 'AI assistance is currently unavailable. Manual entry still works normally.'}</span>
+          <button type="button" className="ai-text-button" onClick={loadStatus}><RefreshCw size={14} />Retry status</button>
+        </div>
+      )}
+
+      {draft ? (
+        <div className="ai-preview" aria-live="polite">
+          <div className="ai-preview-heading">
+            <div><span className="ai-kicker">Preview only</span><h3>{draft.title}</h3></div>
+            <Badge value={draft[config.level]} />
+          </div>
+          <div className="ai-preview-description">{draft.description}</div>
+          <p className="ai-review-note"><Check size={15} />Review and edit the applied text before creating the {config.singular}.</p>
+          <div className="ai-actions">
+            <button type="button" className="button primary" onClick={() => onApply(draft)}><Check size={16} />Apply to form</button>
+            <button type="button" className="button secondary" onClick={generate} disabled={busy}><RefreshCw className={busy ? 'spin' : ''} size={16} />{busy ? 'Regenerating…' : 'Regenerate'}</button>
+            <button type="button" className="button text" onClick={cancel}><X size={16} />Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div className="ai-compose">
+          <label className="field" htmlFor={`${type}-ai-prompt`}>
+            <span>What should this {config.singular} cover?</span>
+            <textarea
+              id={`${type}-ai-prompt`}
+              rows="4"
+              minLength="5"
+              maxLength="600"
+              placeholder={type === 'tasks'
+                ? 'Example: Add OTP verification with a 5-minute expiry and clear acceptance criteria.'
+                : 'Example: Saving a task fails after the session expires; include reproduction steps and expected behavior.'}
+              value={prompt}
+              disabled={busy || !ready}
+              onChange={(event) => { setPrompt(event.target.value); setError('') }}
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  if (!busy && ready) generate()
+                }
+              }}
+            />
+          </label>
+          <div className="ai-compose-meta">
+            <span>Use Ctrl/⌘ + Enter to generate</span>
+            <span>{prompt.length}/600</span>
+          </div>
+          {error && <p className="ai-error" role="alert"><AlertCircle size={15} />{error}</p>}
+          <div className="ai-actions">
+            <button type="button" className="button ai-generate-button" onClick={generate} disabled={busy || !ready || !projectId || !validPrompt}>
+              {busy ? <LoaderCircle className="spin" size={17} /> : <WandSparkles size={17} />}
+              {busy ? 'Creating preview…' : `Generate ${capitalize(config.singular)} draft`}
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
+}
+
+function AiStatusPill({ checking, status }) {
+  if (checking) return <span className="ai-status-pill checking"><LoaderCircle className="spin" size={12} />Checking</span>
+  if (!status) return <span className="ai-status-pill unavailable">Unavailable</span>
+  if (!status.enabled) return <span className="ai-status-pill disabled">Disabled</span>
+  if (!status.configured) return <span className="ai-status-pill unconfigured">Not configured</span>
+  if (!status.available) return <span className="ai-status-pill unavailable">Unavailable</span>
+  return <span className="ai-status-pill ready"><span />Ready</span>
+}
+
+function aiAssistantError(error, fallback = 'AI could not create a draft. You can retry or continue manually.') {
+  const status = error.response?.status
+  if (status === 400) return apiError(error, 'Check the prompt and selected project, then try again.')
+  if (status === 404) return 'The selected project is no longer available. Choose another project.'
+  if (status === 429) return 'AI is busy or rate-limited. Wait a moment and try again.'
+  if (status === 502) return 'The provider returned an invalid draft. Try regenerating with a clearer prompt.'
+  if (status === 503) return 'AI assistance is temporarily unavailable. Manual entry still works normally.'
+  return apiError(error, fallback)
 }
 
 export function WorkItemDetailsPage({ type }) {

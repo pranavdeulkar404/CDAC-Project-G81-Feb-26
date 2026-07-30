@@ -5,6 +5,8 @@ import com.sprintflow.bug.repository.BugRepository;
 import com.sprintflow.common.exception.BusinessException;
 import com.sprintflow.common.exception.ResourceNotFoundException;
 import com.sprintflow.common.response.PageResponse;
+import com.sprintflow.integration.audit.AuditEventPublisher;
+import com.sprintflow.integration.audit.AuditEventType;
 import com.sprintflow.integration.notification.EmailNotificationRequest;
 import com.sprintflow.integration.notification.EmailNotificationType;
 import com.sprintflow.notification.entity.NotificationType;
@@ -37,6 +39,7 @@ public class ProjectService {
     private final CurrentUserService currentUserService;
     private final UserService userService;
     private final NotificationService notificationService;
+    private final AuditEventPublisher auditEventPublisher;
 
     public ProjectService(
             ProjectRepository projectRepository,
@@ -44,7 +47,8 @@ public class ProjectService {
             BugRepository bugRepository,
             CurrentUserService currentUserService,
             UserService userService,
-            NotificationService notificationService
+            NotificationService notificationService,
+            AuditEventPublisher auditEventPublisher
     ) {
         this.projectRepository = projectRepository;
         this.taskRepository = taskRepository;
@@ -52,6 +56,7 @@ public class ProjectService {
         this.currentUserService = currentUserService;
         this.userService = userService;
         this.notificationService = notificationService;
+        this.auditEventPublisher = auditEventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -76,10 +81,21 @@ public class ProjectService {
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
     public ProjectResponse create(ProjectRequest request) {
         validateDates(request);
+        User actor = currentUserService.requireUser();
         Project project = new Project();
         apply(project, request);
-        project.setCreatedBy(currentUserService.requireUser());
-        return response(projectRepository.save(project));
+        project.setCreatedBy(actor);
+        Project saved = projectRepository.save(project);
+        auditEventPublisher.publish(
+                AuditEventType.PROJECT_CREATED,
+                "PROJECT",
+                saved.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Created project \"" + saved.getTitle() + "\".",
+                Map.of("status", saved.getStatus().name())
+        );
+        return response(saved);
     }
 
     @Transactional
@@ -95,6 +111,18 @@ public class ProjectService {
         if (oldStatus != saved.getStatus()) {
             notifyProjectMembers(saved, actor, oldStatus);
         }
+        auditEventPublisher.publish(
+                AuditEventType.PROJECT_UPDATED,
+                "PROJECT",
+                saved.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Updated project \"" + saved.getTitle() + "\".",
+                Map.of(
+                        "previousStatus", oldStatus.name(),
+                        "status", saved.getStatus().name()
+                )
+        );
         return response(saved);
     }
 
@@ -108,6 +136,15 @@ public class ProjectService {
             throw new BusinessException("Archive projects that already contain tasks or bugs instead of deleting them");
         }
         projectRepository.delete(project);
+        auditEventPublisher.publish(
+                AuditEventType.PROJECT_DELETED,
+                "PROJECT",
+                project.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Deleted project \"" + project.getTitle() + "\".",
+                Map.of("status", project.getStatus().name())
+        );
     }
 
     public Project require(Long id) {

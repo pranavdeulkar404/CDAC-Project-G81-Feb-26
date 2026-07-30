@@ -67,3 +67,9 @@ export const dashboardService = {
 export const commentService = {
   remove: (id) => api.delete(`/comments/${id}`),
 }
+
+export const aiService = {
+  status: () => body(api.get('/ai/status')),
+  generateTask: (data) => body(api.post('/ai/tasks/generate', data, { timeout: 30000 })),
+  generateBug: (data) => body(api.post('/ai/bugs/generate', data, { timeout: 30000 })),
+}

@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Configuration;
 @OpenAPIDefinition(info = @Info(
         title = "SprintFlow API",
         version = "1.0",
-        description = "Project, task, bug, collaboration, and notification endpoints for SprintFlow"
+        description = "Project, task, bug, collaboration, notification, and optional preview-only AI drafting endpoints for SprintFlow"
 ))
 @SecurityScheme(
         name = "bearerAuth",

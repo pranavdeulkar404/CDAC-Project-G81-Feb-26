@@ -1,18 +1,19 @@
 # SprintFlow local setup and viva guide
 
-This guide describes the implementation that is present in this folder. The project contains three independently runnable applications:
+This guide describes the implementation that is present in this folder. The project contains four independently runnable applications:
 
 ```text
 SprintFlow/
 ├── sprintflow-api/                  Spring Boot main application, port 8080
 ├── sprintflow-notification-service/ Spring Boot Gmail sender, port 8081
+├── sprintflow-audit-service/         ASP.NET Core audit/telemetry service, port 8082
 ├── sprintflow-ui/                   React and Vite application, port 5173
 └── START_HERE.md
 ```
 
 ## 1. Architecture
 
-The browser communicates only with `sprintflow-api`. The main API owns authentication, authorisation, MySQL data, business rules, dashboards, and in-app notifications. It sends a structured REST request to the notification service when an email is useful. The notification service owns Gmail SMTP and HTML email rendering.
+The browser communicates only with `sprintflow-api`. The main API owns authentication, authorisation, MySQL data, business rules, dashboards, and in-app notifications. It sends a structured REST request to the notification service when an email is useful. The notification service owns Gmail SMTP and HTML email rendering. After a successful project, task, or bug transaction, the API also forwards a compact audit event asynchronously to the ASP.NET Core telemetry service.
 
 ```mermaid
 flowchart LR
@@ -21,10 +22,14 @@ flowchart LR
     API -->|JPA / Hibernate| DB[("MySQL 8 · sprintflow")]
     API -->|Structured email request| MAIL["Notification service :8081"]
     MAIL -->|TLS SMTP| GMAIL["Gmail SMTP"]
+    API -->|After-commit audit event| AUDIT["ASP.NET Core audit service :8082"]
+    AUDIT -->|Rolling JSON| LOGS[("Local log files")]
     API -->|Persist| INAPP["In-app notifications"]
 ```
 
 Email delivery is deliberately outside the main database transaction. `NotificationClient` catches connection, timeout, and non-success response failures. A project, task, bug, registration, or comment operation therefore remains valid when Gmail is temporarily unavailable.
+
+Audit delivery is also deliberately isolated from the main transaction. An internal event is published with immutable actor and entity metadata, handled only after commit, and sent on a small bounded executor. A connection failure, timeout, invalid response, or stopped audit service is logged as a warning and never rolls back the user's project, task, or bug change. The collector is demonstration telemetry with rotating local files, not a tamper-proof legal audit database.
 
 ### Final data-model decisions
 
@@ -185,7 +190,7 @@ sprintflow-api/
     │   │   ├── comment/         exactly-one-parent comments
     │   │   ├── notification/    in-app notification history and actions
     │   │   ├── dashboard/       live personal statistics
-    │   │   ├── integration/     resilient notification-service client
+    │   │   ├── integration/     resilient notification and audit clients
     │   │   ├── common/          auditing, page response, exception handling
     │   │   └── config/          security, OpenAPI, administrator seeding
     │   └── resources/application.properties
@@ -202,6 +207,15 @@ sprintflow-notification-service/
     │   │   └── exception/       validation error responses
     │   └── resources/           base, ignored local, and safe example configuration
     └── test/                     request validation and SMTP-failure tests
+
+sprintflow-audit-service/
+├── SprintFlow.AuditService.csproj
+├── Program.cs                    health, OpenAPI, validation, and event endpoint
+├── appsettings.json              console and bounded rolling-file configuration
+├── Models/                       event contract and allowed event types
+├── Services/                     structured audit sink boundary
+├── logs/                         generated JSON logs; ignored by Git
+└── tests/                        endpoint and validation tests
 
 sprintflow-ui/
 ├── package.json
@@ -225,6 +239,7 @@ Install:
 - Maven 3.9 or later.
 - Node.js 20 LTS or later with npm.
 - MySQL Server 8.x.
+- .NET SDK 10.x.
 
 Check from PowerShell or Command Prompt:
 
@@ -234,6 +249,7 @@ mvn -version
 node --version
 npm --version
 mysql --version
+dotnet --info
 ```
 
 The expected local values are:
@@ -253,10 +269,13 @@ Start applications in this order:
 
 1. MySQL
 2. Notification service
-3. Main API
-4. React UI
+3. Audit and telemetry service
+4. Main API
+5. React UI
 
-Open four PowerShell windows.
+Open five PowerShell windows. Spring Tool Suite can continue to run both Java
+applications; run the .NET service in its own PowerShell terminal because it is
+an ASP.NET Core project rather than a Spring project.
 
 ### Window 1: verify MySQL
 
@@ -296,7 +315,59 @@ sprintflow-notification-service/src/main/resources/application-local.properties
 
 The supplied ZIP contains the ready local file. The safe `.example` file does not contain the real app password.
 
-### Window 3: main API
+### Window 3: audit and telemetry service
+
+```powershell
+Set-Location "C:\path\to\SprintFlow\sprintflow-audit-service"
+dotnet run
+```
+
+Wait for `Now listening on: http://localhost:8082`.
+
+- Health: `http://localhost:8082/health`
+- OpenAPI: `http://localhost:8082/openapi/v1.json`
+- Generated logs: `sprintflow-audit-service\logs\sprintflow-audit-YYYYMMDD.json`
+
+Watch the current JSON file while using SprintFlow:
+
+```powershell
+Get-Content ".\logs\sprintflow-audit-$(Get-Date -Format yyyyMMdd).json" -Wait
+```
+
+The log rolls daily and at 10 MB, and retains 14 files. There is intentionally
+no React audit dashboard or public internet endpoint. If this service is stopped,
+the main API prints a warning and continues saving normal work.
+
+### Window 4: main API
+
+Groq-powered drafting is optional. SprintFlow still starts and all normal CRUD flows still work when no key is configured. To enable it for the current PowerShell window, set the key only in the backend terminal:
+
+```powershell
+Set-Location "C:\path\to\SprintFlow\sprintflow-api"
+$env:GROQ_API_KEY = "paste-your-groq-key-here"
+$env:GROQ_MODEL = "openai/gpt-oss-20b"
+mvn spring-boot:run
+```
+
+The equivalent Command Prompt setup is:
+
+```bat
+cd /d "C:\path\to\SprintFlow\sprintflow-api"
+set GROQ_API_KEY=paste-your-groq-key-here
+set GROQ_MODEL=openai/gpt-oss-20b
+mvn spring-boot:run
+```
+
+For a persistent Windows user variable, run the following once, then close the terminal and open a new one before starting the API. `setx` does not update the terminal that is already open.
+
+```powershell
+setx GROQ_API_KEY "paste-your-groq-key-here"
+setx GROQ_MODEL "openai/gpt-oss-20b"
+```
+
+`sprintflow-api/.env.example` documents the available values, but Spring Boot does not automatically load that file. Never use a `VITE_` variable for the Groq key, never place it in the React `.env`, and never commit it to source control.
+
+If AI is not needed, use the normal start command with no key:
 
 ```powershell
 Set-Location "C:\path\to\SprintFlow\sprintflow-api"
@@ -305,7 +376,9 @@ mvn spring-boot:run
 
 Wait for `Tomcat started on port 8080`. The first successful start creates/updates the schema and seeds the administrator.
 
-### Window 4: React UI
+The optional assistant calls Groq over the internet; it does not download or run a local model. The default model and base URL are configurable with `GROQ_MODEL` and `GROQ_BASE_URL`. Restart the API after changing any AI environment variable.
+
+### Window 5: React UI
 
 ```powershell
 Set-Location "C:\path\to\SprintFlow\sprintflow-ui"
@@ -319,6 +392,8 @@ Open:
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
 - Main API health: `http://localhost:8080/actuator/health`
 - Notification health: `http://localhost:8081/actuator/health`
+- Audit health: `http://localhost:8082/health`
+- Audit OpenAPI: `http://localhost:8082/openapi/v1.json`
 
 Equivalent Command Prompt navigation:
 
@@ -441,6 +516,62 @@ Comments, notifications, and dashboard:
 | DELETE | `/api/notifications/{id}` | Delete own notification |
 | GET | `/api/dashboard` | Real current-user statistics |
 
+Optional AI drafting:
+
+| Method | Path | Access and behavior |
+|---|---|---|
+| GET | `/api/ai/status` | Any authenticated user; performs no model generation |
+| POST | `/api/ai/tasks/generate` | ADMIN, MANAGER; returns a task preview and never persists it |
+| POST | `/api/ai/bugs/generate` | ADMIN, MANAGER; returns a bug preview and never persists it |
+
+Both generation endpoints accept only a short prompt and a visible project ID:
+
+```json
+{
+  "prompt": "Add OTP verification with a five-minute expiry and clear acceptance criteria.",
+  "projectId": 1
+}
+```
+
+Example task response:
+
+```json
+{
+  "title": "Add OTP Verification",
+  "description": "Overview\n...\n\nAcceptance Criteria\n- ...\n\nImplementation Notes\n...",
+  "priority": "HIGH"
+}
+```
+
+Example bug response:
+
+```json
+{
+  "title": "Task Save Fails After Session Expiry",
+  "description": "Summary\n...\n\nSteps to Reproduce\n...\n\nExpected Behaviour\n...\n\nActual Behaviour\n...\n\nAdditional Information\n...",
+  "severity": "HIGH"
+}
+```
+
+Try a preview from PowerShell after signing in and copying the JWT:
+
+```powershell
+$headers = @{ Authorization = "Bearer <your-jwt>" }
+$body = @{
+    prompt = "Add OTP verification with a five-minute expiry and clear acceptance criteria."
+    projectId = 1
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8080/api/ai/tasks/generate" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+The UI shows the result as a preview. **Apply to form** copies only title, description, and priority/severity. It preserves project, assignee, status, and due date, asks before replacing existing text, and never submits the create form automatically.
+
 The notification service accepts `POST /api/emails` from the main API and exposes `/actuator/health`.
 
 ## 8. Major files to explain in a viva
@@ -455,6 +586,12 @@ The notification service accepts `POST /api/emails` from the main API and expose
 - Repository classes: pagination, filters, counts, and member-relevant queries.
 - `NotificationService.java`: current-user history plus in-app event creation.
 - `NotificationClient.java`: five-second timeouts and failure isolation for the mail service.
+- `AuditEventPublisher.java` / `SpringAuditEventPublisher.java`: small integration boundary that turns committed domain actions into immutable telemetry events.
+- `AuditEventForwarder.java` / `HttpAuditClient.java`: after-commit asynchronous delivery with bounded resources, short timeouts, and failure isolation.
+- `sprintflow-audit-service/Program.cs`: ASP.NET Core health, OpenAPI, validation, and `202 Accepted` audit receiver.
+- `StructuredLogAuditEventSink.cs` / `appsettings.json`: structured console output and daily/size-based JSON file rotation.
+- `AiGenerationProvider.java` / `GroqAiGenerationProvider.java`: optional provider boundary, structured output, corrective retry, rate limiting, circuit breaker, and safe logs.
+- `AiGenerationService.java` / `AiDraftValidator.java`: project authorization, minimal context, prompt hardening, strict allow-list validation, and preview-only responses.
 - `EmailTemplateFactory.java`: safe HTML escaping and type-specific email content.
 - `client.js`: the only Axios instance; JWT and central `401`/`403` handling.
 - `AuthContext.jsx`: browser session identity and role helpers.
@@ -483,6 +620,10 @@ The API supports environment overrides:
 $env:SPRINTFLOW_DB_USERNAME = "root"
 $env:SPRINTFLOW_DB_PASSWORD = "a-new-local-password"
 $env:SPRINTFLOW_JWT_SECRET = "a-base64-encoded-secret-of-at-least-32-bytes"
+$env:GROQ_API_KEY = "paste-your-groq-key-here"
+$env:GROQ_MODEL = "openai/gpt-oss-20b"
+$env:SPRINTFLOW_AUDIT_ENABLED = "true"
+$env:SPRINTFLOW_AUDIT_URL = "http://localhost:8082"
 mvn spring-boot:run
 ```
 
@@ -512,7 +653,7 @@ CREATE DATABASE sprintflow CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 **Port already in use**
 
 ```powershell
-Get-NetTCPConnection -State Listen -LocalPort 8080,8081,5173
+Get-NetTCPConnection -State Listen -LocalPort 8080,8081,8082,5173
 Get-Process -Id <OwningProcess>
 ```
 
@@ -530,6 +671,26 @@ Sign out and sign in again. JWTs expire after eight hours. Confirm the API JWT s
 
 Open `http://localhost:8081/actuator/health`. Start it before the API. Main work is still saved; only the email attempt is missed.
 
+**Audit service unavailable**
+
+Open `http://localhost:8082/health`. Start the service with `dotnet run` from
+`sprintflow-audit-service`. Main project, task, and bug changes are still saved;
+only that telemetry event is missed. The API intentionally does not retry forever
+or block the user's request.
+
+**Audit log file is not visible**
+
+Create or update a project, task, or bug after both ports 8080 and 8082 are
+running. The folder is created on the first logged event:
+
+```powershell
+Get-ChildItem "C:\path\to\SprintFlow\sprintflow-audit-service\logs"
+Get-Content "C:\path\to\SprintFlow\sprintflow-audit-service\logs\sprintflow-audit-$(Get-Date -Format yyyyMMdd).json" -Wait
+```
+
+The health request itself also produces normal framework output, but only
+accepted audit events contain the structured `AuditEvent` property.
+
 **Gmail authentication failed / invalid App Password**
 
 Confirm two-step verification is enabled, use an App Password rather than the normal Gmail password, remove display spaces, rotate it as described above, and restart the notification service.
@@ -537,6 +698,18 @@ Confirm two-step verification is enabled, use an App Password rather than the no
 **Email timeout**
 
 Check internet connectivity, firewall access to `smtp.gmail.com:587`, and system date/time. Both SMTP and API-to-mail-service connections have five-second timeouts.
+
+**AI shows “Not configured”**
+
+This means the backend process did not receive `GROQ_API_KEY`. Set it in the same terminal that starts `mvn spring-boot:run`, or use `setx` and open a new terminal. Do not add the key to React. Call `GET /api/ai/status` with a valid JWT to confirm the server state.
+
+**AI is disabled or temporarily unavailable**
+
+`SPRINTFLOW_AI_ENABLED=false` intentionally disables drafting. A `429` means the concurrency/provider limit was reached; wait briefly and retry. A `502` means the provider returned unusable structured output even after one correction. A `503` covers missing configuration, timeout, open circuit, or provider outage. These failures affect only the optional draft preview; manual forms and CRUD remain available.
+
+**AI provider timeout**
+
+Check internet/firewall access to `https://api.groq.com`, confirm the key and configured model are valid, then retry. The default backend timeout is 25 seconds and can be changed with `SPRINTFLOW_AI_TIMEOUT_SECONDS`.
 
 **Frontend dependency error**
 
@@ -564,9 +737,12 @@ mvn clean package
 Set-Location "C:\path\to\SprintFlow\sprintflow-notification-service"
 mvn clean package
 
+Set-Location "C:\path\to\SprintFlow\sprintflow-audit-service"
+dotnet test ".\tests\SprintFlow.AuditService.Tests\SprintFlow.AuditService.Tests.csproj"
+
 Set-Location "C:\path\to\SprintFlow\sprintflow-ui"
 npm install
 npm run build
 ```
 
-Generated build folders (`target`, `dist`, and `node_modules`) are deliberately excluded from the clean source ZIP because each is reproducible with these commands.
+Generated build folders (`target`, `bin`, `obj`, `dist`, and `node_modules`) plus runtime audit `logs` are deliberately excluded from the clean source ZIP because build outputs are reproducible and telemetry is local runtime data.

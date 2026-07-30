@@ -3,3 +3,10 @@
 /.vscode/
 *.iml
 *.log
+.env
+.env.*
+!.env.example
+src/main/resources/application-local.properties
+src/main/resources/application-secret.properties
+secrets/
+*.key

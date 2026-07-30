@@ -5,6 +5,8 @@ import com.sprintflow.comment.repository.CommentRepository;
 import com.sprintflow.common.exception.BusinessException;
 import com.sprintflow.common.exception.ResourceNotFoundException;
 import com.sprintflow.common.response.PageResponse;
+import com.sprintflow.integration.audit.AuditEventPublisher;
+import com.sprintflow.integration.audit.AuditEventType;
 import com.sprintflow.integration.notification.EmailNotificationRequest;
 import com.sprintflow.integration.notification.EmailNotificationType;
 import com.sprintflow.notification.entity.NotificationType;
@@ -28,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.Objects;
 
 @Service
@@ -39,6 +42,7 @@ public class TaskService {
     private final UserService userService;
     private final CurrentUserService currentUserService;
     private final NotificationService notificationService;
+    private final AuditEventPublisher auditEventPublisher;
 
     public TaskService(
             TaskRepository taskRepository,
@@ -46,7 +50,8 @@ public class TaskService {
             ProjectService projectService,
             UserService userService,
             CurrentUserService currentUserService,
-            NotificationService notificationService
+            NotificationService notificationService,
+            AuditEventPublisher auditEventPublisher
     ) {
         this.taskRepository = taskRepository;
         this.commentRepository = commentRepository;
@@ -54,6 +59,7 @@ public class TaskService {
         this.userService = userService;
         this.currentUserService = currentUserService;
         this.notificationService = notificationService;
+        this.auditEventPublisher = auditEventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -87,6 +93,19 @@ public class TaskService {
         if (saved.getAssignedTo() != null) {
             notifyAssignment(saved, null, saved.getAssignedTo(), actor);
         }
+        auditEventPublisher.publish(
+                AuditEventType.TASK_CREATED,
+                "TASK",
+                saved.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Created task \"" + saved.getTitle() + "\".",
+                Map.of(
+                        "projectId", saved.getProject().getId().toString(),
+                        "priority", saved.getPriority().name(),
+                        "status", saved.getStatus().name()
+                )
+        );
         return response(saved);
     }
 
@@ -114,6 +133,20 @@ public class TaskService {
                     "The due date for task \"" + saved.getTitle() + "\" is now "
                             + (saved.getDueDate() == null ? "not set" : saved.getDueDate()) + ".");
         }
+        auditEventPublisher.publish(
+                AuditEventType.TASK_UPDATED,
+                "TASK",
+                saved.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Updated task \"" + saved.getTitle() + "\".",
+                Map.of(
+                        "projectId", saved.getProject().getId().toString(),
+                        "previousStatus", oldStatus.name(),
+                        "status", saved.getStatus().name(),
+                        "priority", saved.getPriority().name()
+                )
+        );
         return response(saved);
     }
 
@@ -129,6 +162,19 @@ public class TaskService {
             notifyUpdate(saved, actor, NotificationType.STATUS_UPDATE,
                     "Task \"" + saved.getTitle() + "\" moved from " + label(old.name())
                             + " to " + label(status.name()) + ".");
+            auditEventPublisher.publish(
+                    AuditEventType.TASK_STATUS_CHANGED,
+                    "TASK",
+                    saved.getId(),
+                    actor.getId(),
+                    actor.getName(),
+                    "Changed task \"" + saved.getTitle() + "\" status.",
+                    Map.of(
+                            "projectId", saved.getProject().getId().toString(),
+                            "previousStatus", old.name(),
+                            "status", status.name()
+                    )
+            );
         }
         return response(saved);
     }
@@ -137,11 +183,24 @@ public class TaskService {
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
     public void delete(Long id) {
         TaskItem task = require(id);
-        requireManage(task, currentUserService.requireUser());
+        User actor = currentUserService.requireUser();
+        requireManage(task, actor);
         if (commentRepository.existsByTaskId(id)) {
             throw new BusinessException("Tasks with comments cannot be deleted");
         }
         taskRepository.delete(task);
+        auditEventPublisher.publish(
+                AuditEventType.TASK_DELETED,
+                "TASK",
+                task.getId(),
+                actor.getId(),
+                actor.getName(),
+                "Deleted task \"" + task.getTitle() + "\".",
+                Map.of(
+                        "projectId", task.getProject().getId().toString(),
+                        "status", task.getStatus().name()
+                )
+        );
     }
 
     public TaskItem require(Long id) {

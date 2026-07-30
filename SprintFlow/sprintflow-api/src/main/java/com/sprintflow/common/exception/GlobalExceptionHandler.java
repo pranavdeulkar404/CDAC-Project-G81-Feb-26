@@ -1,5 +1,9 @@
 package com.sprintflow.common.exception;
 
+import com.sprintflow.ai.exception.AiDisabledException;
+import com.sprintflow.ai.exception.AiInvalidResponseException;
+import com.sprintflow.ai.exception.AiRateLimitException;
+import com.sprintflow.ai.exception.AiUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -58,6 +62,25 @@ public class GlobalExceptionHandler {
     ResponseEntity<ApiError> integrity(DataIntegrityViolationException exception, HttpServletRequest request) {
         return response(HttpStatus.CONFLICT, "Conflict",
                 "The operation conflicts with existing SprintFlow data", request.getRequestURI(), Map.of());
+    }
+
+    @ExceptionHandler(AiRateLimitException.class)
+    ResponseEntity<ApiError> aiRateLimit(AiRateLimitException exception, HttpServletRequest request) {
+        return response(HttpStatus.TOO_MANY_REQUESTS, "Too Many Requests",
+                exception.getMessage(), request.getRequestURI(), Map.of());
+    }
+
+    @ExceptionHandler(AiInvalidResponseException.class)
+    ResponseEntity<ApiError> aiInvalid(AiInvalidResponseException exception, HttpServletRequest request) {
+        return response(HttpStatus.BAD_GATEWAY, "Bad Gateway",
+                "The AI could not prepare a valid draft. Please try again or continue manually.",
+                request.getRequestURI(), Map.of());
+    }
+
+    @ExceptionHandler({AiDisabledException.class, AiUnavailableException.class})
+    ResponseEntity<ApiError> aiUnavailable(RuntimeException exception, HttpServletRequest request) {
+        return response(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable",
+                exception.getMessage(), request.getRequestURI(), Map.of());
     }
 
     @ExceptionHandler(Exception.class)

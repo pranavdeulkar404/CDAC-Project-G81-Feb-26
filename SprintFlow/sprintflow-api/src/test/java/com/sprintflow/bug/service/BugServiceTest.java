@@ -7,6 +7,8 @@ import com.sprintflow.bug.entity.BugSeverity;
 import com.sprintflow.bug.entity.BugStatus;
 import com.sprintflow.bug.repository.BugRepository;
 import com.sprintflow.comment.repository.CommentRepository;
+import com.sprintflow.integration.audit.AuditEventPublisher;
+import com.sprintflow.integration.audit.AuditEventType;
 import com.sprintflow.notification.service.NotificationService;
 import com.sprintflow.project.entity.Project;
 import com.sprintflow.project.entity.ProjectStatus;
@@ -34,6 +36,7 @@ class BugServiceTest {
     @Mock UserService userService;
     @Mock CurrentUserService currentUserService;
     @Mock NotificationService notificationService;
+    @Mock AuditEventPublisher auditEventPublisher;
     BugService service;
     User manager;
     User firstAssignee;
@@ -43,7 +46,7 @@ class BugServiceTest {
     @BeforeEach
     void setUp() {
         service = new BugService(bugRepository, commentRepository, projectService,
-                userService, currentUserService, notificationService);
+                userService, currentUserService, notificationService, auditEventPublisher);
         manager = user(1L, "Manager", UserRole.MANAGER);
         firstAssignee = user(2L, "First", UserRole.MEMBER);
         secondAssignee = user(3L, "Second", UserRole.MEMBER);
@@ -67,6 +70,8 @@ class BugServiceTest {
         service.create(request(2L));
         verify(notificationService).notify(eq(firstAssignee), eq(manager), contains("assigned to you"),
                 any(), any(), eq(30L), any());
+        verify(auditEventPublisher).publish(eq(AuditEventType.BUG_CREATED), eq("BUG"),
+                eq(30L), eq(1L), eq("Manager"), contains("Login issue"), anyMap());
     }
 
     @Test

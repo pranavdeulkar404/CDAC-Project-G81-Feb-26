@@ -3,6 +3,8 @@ package com.sprintflow.project.service;
 import com.sprintflow.auth.security.CurrentUserService;
 import com.sprintflow.bug.repository.BugRepository;
 import com.sprintflow.common.exception.BusinessException;
+import com.sprintflow.integration.audit.AuditEventPublisher;
+import com.sprintflow.integration.audit.AuditEventType;
 import com.sprintflow.notification.service.NotificationService;
 import com.sprintflow.project.dto.ProjectRequest;
 import com.sprintflow.project.entity.Project;
@@ -37,12 +39,13 @@ class ProjectServiceTest {
     @Mock CurrentUserService currentUserService;
     @Mock UserService userService;
     @Mock NotificationService notificationService;
+    @Mock AuditEventPublisher auditEventPublisher;
     ProjectService service;
 
     @BeforeEach
     void setUp() {
         service = new ProjectService(projectRepository, taskRepository, bugRepository,
-                currentUserService, userService, notificationService);
+                currentUserService, userService, notificationService, auditEventPublisher);
         lenient().when(projectRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -58,6 +61,8 @@ class ProjectServiceTest {
         ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
         verify(projectRepository).save(captor.capture());
         assertThat(captor.getValue().getCreatedBy()).isSameAs(manager);
+        verify(auditEventPublisher).publish(eq(AuditEventType.PROJECT_CREATED), eq("PROJECT"),
+                isNull(), eq(1L), eq("MANAGER"), contains("Portal"), anyMap());
     }
 
     @Test
